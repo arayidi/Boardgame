@@ -1,0 +1,89 @@
+trigger:
+  branches:
+    include:
+      - master
+      - develop
+
+parameters:
+  - name: requestNumber
+    displayName: 'Request Number'
+    type: string
+    default: '000000'
+  - name: environment
+    displayName: 'Environment'
+    type: string
+    default: 'TEST'
+    values:
+      - TEST
+      - QA
+
+# Set build number as BranchName_RequestNumber
+name: $(Build.SourceBranchName)_$(parameters.requestNumber)_$(Date:yyyyMMdd)$(Rev:.r)
+
+stages:
+  ### CI Stage: Build the .NET Application ###
+  - stage: CI
+    displayName: 'Build .NET Application'
+    jobs:
+      - job: Build
+        pool:
+         name: Windows
+
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              packageType: 'sdk'
+              version: '6.x' # .NET SDK version
+              installationPath: $(Agent.ToolsDirectory)/dotnet
+
+          # Display the custom build number
+          - script: |
+              echo "Build Number: $(Build.BuildId)"
+              echo "Request Number: $(parameters.requestNumber)"
+              echo "Branch Name: $(Build.SourceBranchName)"
+            displayName: 'Show Build Info'
+
+          # Build the .NET application
+          - script: |
+              dotnet build --configuration Release
+            displayName: 'Build Solution'
+
+          # Publish the build artifacts
+          - task: PublishPipelineArtifact@1
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'drop'
+              publishLocation: 'pipeline'
+            displayName: 'Publish Build Artifacts'
+
+  ### CD Stage: Deploy to Test/QA Environment ###
+  - stage: CD
+    displayName: 'Deploy to $(parameters.environment) Web App'
+    dependsOn: CI
+    jobs:
+      - job: Deploy
+        pool:
+          vmImage: 'windows-latest'
+        steps:
+          - download: current
+            artifact: drop
+            displayName: 'Download Build Artifacts'
+
+          # Deploy to Azure Web App based on environment (TEST or QA)
+          - task: AzureWebApp@1
+            displayName: 'Deploy to $(parameters.environment) Web App'
+            inputs:
+              azureSubscription: 'Pay-As-You-Go(9b31286f-b18c-4823-9f03-7660604e1939)'
+              appType: 'webApp'
+              appName: 'test-dotnet1015'
+              package: '$(Pipeline.Workspace)/drop/**/*.zip'
+              deploymentMethod: 'auto'
+
+          # Use build number as part of deployment output
+          - script: |
+              echo "Deployed Build $(Build.BuildId) to $(parameters.environment) Web App"
+            displayName: 'Confirm Deployment'
+
+
+
+    
